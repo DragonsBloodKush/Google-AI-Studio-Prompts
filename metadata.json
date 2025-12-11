@@ -1,0 +1,8 @@
+{
+  "name": "Pastel Vlog AI",
+  "description": "An elegant video journaling app where an AI host interviews you in real-time while you record.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone"
+  ]
+}
