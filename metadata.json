@@ -1,8 +1,9 @@
 {
-  "name": "Pastel Vlog AI",
+  "name": "Captain's Log",
   "description": "An elegant video journaling app where an AI host interviews you in real-time while you record.",
   "requestFramePermissions": [
     "camera",
-    "microphone"
+    "microphone",
+    "geolocation"
   ]
 }

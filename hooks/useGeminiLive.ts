@@ -1,21 +1,39 @@
+
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { GoogleGenAI, LiveServerMessage, Modality } from '@google/genai';
 import { createPcmBlob, decodeAudioData, base64ToUint8Array, AUDIO_PLAYBACK_RATE } from '../utils/audioUtils';
-import { AIConfig } from '../types';
+import { AIConfig, TranscriptEntry, CrewMember, WeatherData } from '../types';
+import { generateSystemInstruction } from '../utils/logicTree';
 
 interface UseGeminiLiveProps {
   apiKey: string;
   config: AIConfig;
   isRecording: boolean;
+  isPaused: boolean;
   audioStream: MediaStream | null;
+  crew: CrewMember[];
+  isIncidentMode: boolean;
+  weather: WeatherData | null;
 }
 
-export const useGeminiLive = ({ apiKey, config, isRecording, audioStream }: UseGeminiLiveProps) => {
+export const useGeminiLive = ({ 
+  apiKey, 
+  config, 
+  isRecording, 
+  isPaused, 
+  audioStream,
+  crew,
+  isIncidentMode,
+  weather
+}: UseGeminiLiveProps) => {
   const [isConnected, setIsConnected] = useState(false);
   const [currentText, setCurrentText] = useState<string>('');
-  const [isSpeaking, setIsSpeaking] = useState(false); // If AI is currently speaking
+  const [isSpeaking, setIsSpeaking] = useState(false); 
+  const [aiStream, setAiStream] = useState<MediaStream | null>(null);
+  const [transcript, setTranscript] = useState<TranscriptEntry[]>([]);
+  const [error, setError] = useState<Error | null>(null);
 
-  // Refs for audio processing to avoid stale closures and re-renders
+  // Refs for audio processing
   const sessionPromiseRef = useRef<Promise<any> | null>(null);
   const inputContextRef = useRef<AudioContext | null>(null);
   const outputContextRef = useRef<AudioContext | null>(null);
@@ -23,31 +41,50 @@ export const useGeminiLive = ({ apiKey, config, isRecording, audioStream }: UseG
   const sourceNodeRef = useRef<MediaStreamAudioSourceNode | null>(null);
   const nextStartTimeRef = useRef<number>(0);
   const sourcesRef = useRef<Set<AudioBufferSourceNode>>(new Set());
+  const aiStreamDestRef = useRef<MediaStreamAudioDestinationNode | null>(null);
   
-  // Keep config in a ref to access latest value in callbacks without re-connecting
+  // Refs for transcript accumulation
+  const currentInputRef = useRef<string>('');
+  const currentOutputRef = useRef<string>('');
+
   const configRef = useRef(config);
   useEffect(() => {
     configRef.current = config;
   }, [config]);
 
+  // Handle Pause State
+  useEffect(() => {
+    if (outputContextRef.current) {
+      if (isPaused) {
+        outputContextRef.current.suspend();
+      } else {
+        outputContextRef.current.resume();
+      }
+    }
+  }, [isPaused]);
+
+  const isPausedRef = useRef(isPaused);
+  useEffect(() => {
+    isPausedRef.current = isPaused;
+  }, [isPaused]);
+
   const cleanup = useCallback(() => {
-    // Stop all playing sources
     sourcesRef.current.forEach(source => {
       try { source.stop(); } catch (e) {}
     });
     sourcesRef.current.clear();
 
-    // Disconnect audio nodes
     if (sourceNodeRef.current) sourceNodeRef.current.disconnect();
     if (scriptProcessorRef.current) scriptProcessorRef.current.disconnect();
     if (inputContextRef.current) inputContextRef.current.close();
     if (outputContextRef.current) outputContextRef.current.close();
 
-    // Close session if possible (GenAI SDK doesn't expose explicit close on promise, but we stop sending)
     sessionPromiseRef.current = null;
     setIsConnected(false);
     setIsSpeaking(false);
     nextStartTimeRef.current = 0;
+    setAiStream(null);
+    setError(null);
   }, []);
 
   const connect = useCallback(async () => {
@@ -57,17 +94,13 @@ export const useGeminiLive = ({ apiKey, config, isRecording, audioStream }: UseG
     inputContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 16000 });
     outputContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: AUDIO_PLAYBACK_RATE });
     
-    const client = new GoogleGenAI({ apiKey });
+    // Create destination for recording AI audio
+    aiStreamDestRef.current = outputContextRef.current.createMediaStreamDestination();
+    setAiStream(aiStreamDestRef.current.stream);
 
-    const systemInstruction = `
-      You are a friendly, charismatic, and slightly curious video podcast host. 
-      The user is recording a vlog or video diary. 
-      Your goal is to actively listen to them and occasionally jump in with short, 
-      engaging follow-up questions to help them elaborate on their thoughts. 
-      Do not interrupt while they are in the middle of a sentence, wait for a pause.
-      Keep your responses concise (under 15 words usually) and natural.
-      If the user stops talking, prompt them with a creative question related to what they just said.
-    `;
+    const client = new GoogleGenAI({ apiKey });
+    // Use the complex logic tree instruction generator with Weather Data
+    const systemInstruction = generateSystemInstruction(isIncidentMode, crew, weather);
 
     try {
       sessionPromiseRef.current = client.live.connect({
@@ -78,13 +111,15 @@ export const useGeminiLive = ({ apiKey, config, isRecording, audioStream }: UseG
             voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Kore' } },
           },
           systemInstruction,
-          // We need transcriptions to display text overlay
           outputAudioTranscription: { },
+          inputAudioTranscription: { },
         },
         callbacks: {
           onopen: () => {
             console.log('Gemini Live Connected');
             setIsConnected(true);
+            setTranscript([]); // Reset transcript on new session
+            setError(null);
           },
           onmessage: async (message: LiveServerMessage) => {
             const currentConfig = configRef.current;
@@ -93,28 +128,43 @@ export const useGeminiLive = ({ apiKey, config, isRecording, audioStream }: UseG
             if (message.serverContent?.outputTranscription) {
               const text = message.serverContent.outputTranscription.text;
               if (text) {
-                setCurrentText(prev => {
-                    // Simple heuristic to clear old text if it's been a while or new sentence
-                    if (prev.length > 100) return text;
-                    return prev + text; 
-                });
-                // Auto-clear text after a delay if needed handled by UI
+                currentOutputRef.current += text;
+                setCurrentText(text); 
               }
             }
             
+            if (message.serverContent?.inputTranscription) {
+              const text = message.serverContent.inputTranscription.text;
+              if (text) {
+                currentInputRef.current += text;
+              }
+            }
+
             if (message.serverContent?.turnComplete) {
-                // Could clear text here or handle turn logic
+              const now = Date.now();
+              setTranscript(prev => {
+                const newEntries: TranscriptEntry[] = [];
+                if (currentInputRef.current.trim()) {
+                   newEntries.push({ role: 'user', text: currentInputRef.current.trim(), timestamp: now });
+                }
+                if (currentOutputRef.current.trim()) {
+                   newEntries.push({ role: 'ai', text: currentOutputRef.current.trim(), timestamp: now });
+                }
+                return [...prev, ...newEntries];
+              });
+              
+              currentInputRef.current = '';
+              currentOutputRef.current = '';
             }
 
             // Handle Audio
             const base64Audio = message.serverContent?.modelTurn?.parts?.[0]?.inlineData?.data;
             if (base64Audio) {
-              
-              // Only play audio if mode is 'audio'
               if (currentConfig.mode === 'audio') {
                 setIsSpeaking(true);
                 const ctx = outputContextRef.current;
-                if (!ctx) return;
+                const dest = aiStreamDestRef.current;
+                if (!ctx || !dest) return;
 
                 const audioBuffer = await decodeAudioData(
                   base64ToUint8Array(base64Audio),
@@ -124,11 +174,11 @@ export const useGeminiLive = ({ apiKey, config, isRecording, audioStream }: UseG
                 
                 const source = ctx.createBufferSource();
                 source.buffer = audioBuffer;
-                source.connect(ctx.destination);
                 
-                // Ensure gapless playback
+                source.connect(ctx.destination);
+                source.connect(dest);
+                
                 const now = ctx.currentTime;
-                // Add a small buffer (0.1s) if we fell behind to prevent glitching, otherwise schedule at end of queue
                 const startTime = Math.max(nextStartTimeRef.current, now + 0.05);
                 
                 source.start(startTime);
@@ -152,6 +202,7 @@ export const useGeminiLive = ({ apiKey, config, isRecording, audioStream }: UseG
           onerror: (err) => {
             console.error('Gemini Live Error', err);
             setIsConnected(false);
+            setError(err instanceof Error ? err : new Error("Gemini Live Error"));
           }
         }
       });
@@ -159,11 +210,10 @@ export const useGeminiLive = ({ apiKey, config, isRecording, audioStream }: UseG
       // Setup Input Stream
       if (inputContextRef.current && audioStream) {
         const source = inputContextRef.current.createMediaStreamSource(audioStream);
-        // Using ScriptProcessor for simplicity in this demo context to access raw PCM
         const processor = inputContextRef.current.createScriptProcessor(4096, 1, 1);
         
         processor.onaudioprocess = (e) => {
-          if (!sessionPromiseRef.current) return;
+          if (!sessionPromiseRef.current || isPausedRef.current) return;
           
           const inputData = e.inputBuffer.getChannelData(0);
           const blob = createPcmBlob(inputData);
@@ -183,22 +233,21 @@ export const useGeminiLive = ({ apiKey, config, isRecording, audioStream }: UseG
     } catch (error) {
       console.error("Failed to connect to Gemini Live", error);
       setIsConnected(false);
+      setError(error instanceof Error ? error : new Error("Failed to connect"));
     }
-  }, [apiKey, audioStream]);
+  }, [apiKey, audioStream, crew, isIncidentMode, weather]);
 
-  // Connect when recording starts, Disconnect when it stops
   useEffect(() => {
-    if (isRecording && !isConnected && config.mode !== 'off') {
-      connect();
+    if (isRecording && config.mode !== 'off') {
+       if (!isConnected) connect();
     } else if (!isRecording && isConnected) {
       cleanup();
     }
   }, [isRecording, isConnected, connect, cleanup, config.mode]);
 
-  // Cleanup on unmount
   useEffect(() => {
     return () => cleanup();
   }, [cleanup]);
 
-  return { isConnected, currentText, isSpeaking };
+  return { isConnected, currentText, isSpeaking, aiStream, transcript, error };
 };

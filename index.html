@@ -1,27 +1,36 @@
+
 <!DOCTYPE html>
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Pastel Vlog AI</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    
+    <!-- PWA Settings -->
+    <link rel="manifest" href="./manifest.json">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="theme-color" content="#141218">
+    <title>Captain's Log</title>
+    
+    <!-- Tailwind via CDN is okay for simple builds, or can be installed locally -->
     <script src="https://cdn.tailwindcss.com"></script>
-    <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;600;700&family=Lato:wght@300;400;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,600;0,700;1,400&family=Roboto:wght@300;400;500;700&display=swap" rel="stylesheet">
     <script>
       tailwind.config = {
         theme: {
           extend: {
             fontFamily: {
               serif: ['"Playfair Display"', 'serif'],
-              sans: ['"Lato"', 'sans-serif'],
+              sans: ['"Roboto"', 'sans-serif'],
             },
             colors: {
-              pastel: {
-                pink: '#FAD2E1',
-                blue: '#C5D0E6',
-                cream: '#FDF6E3',
-                mint: '#D8E2DC',
-                lavender: '#E2D1F9',
-                text: '#4A4A4A'
+              md: {
+                sys: {
+                  primary: '#D0BCFF',
+                  onPrimary: '#381E72',
+                  surface: '#141218',
+                  surfaceContainer: '#1D1B20',
+                }
               }
             }
           }
@@ -30,8 +39,9 @@
     </script>
     <style>
       body {
-        background-color: #FDF6E3;
-        color: #4A4A4A;
+        background-color: #000;
+        color: #E6E1E5;
+        overscroll-behavior: none;
       }
       /* Hide scrollbar for clean UI */
       ::-webkit-scrollbar {
@@ -39,19 +49,22 @@
         background: transparent;
       }
     </style>
-  <script type="importmap">
+<script type="importmap">
 {
   "imports": {
-    "react/": "https://esm.sh/react@^19.2.1/",
-    "react": "https://esm.sh/react@^19.2.1",
-    "@google/genai": "https://esm.sh/@google/genai@^1.32.0",
+    "react": "https://esm.sh/react@^19.2.2",
     "react-dom/": "https://esm.sh/react-dom@^19.2.1/",
-    "lucide-react": "https://esm.sh/lucide-react@^0.559.0"
+    "react/": "https://esm.sh/react@^19.2.2/",
+    "@google/genai": "https://esm.sh/@google/genai@^1.33.0",
+    "lucide-react": "https://esm.sh/lucide-react@^0.560.0",
+    "vite": "https://esm.sh/vite@^7.2.7",
+    "@vitejs/plugin-react": "https://esm.sh/@vitejs/plugin-react@^5.1.2"
   }
 }
 </script>
 </head>
   <body>
     <div id="root"></div>
+    <script type="module" src="./index.tsx"></script>
   </body>
 </html>
