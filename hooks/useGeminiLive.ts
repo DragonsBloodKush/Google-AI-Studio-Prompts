@@ -14,6 +14,7 @@ interface UseGeminiLiveProps {
   crew: CrewMember[];
   isIncidentMode: boolean;
   weather: WeatherData | null;
+  previousLogLocation?: string | null;
 }
 
 export const useGeminiLive = ({ 
@@ -24,7 +25,8 @@ export const useGeminiLive = ({
   audioStream,
   crew,
   isIncidentMode,
-  weather
+  weather,
+  previousLogLocation
 }: UseGeminiLiveProps) => {
   const [isConnected, setIsConnected] = useState(false);
   const [currentText, setCurrentText] = useState<string>('');
@@ -100,7 +102,12 @@ export const useGeminiLive = ({
 
     const client = new GoogleGenAI({ apiKey });
     // Use the complex logic tree instruction generator with Weather Data
-    const systemInstruction = generateSystemInstruction(isIncidentMode, crew, weather);
+    const systemInstruction = generateSystemInstruction(
+      isIncidentMode, 
+      crew, 
+      weather,
+      previousLogLocation
+    );
 
     try {
       sessionPromiseRef.current = client.live.connect({
@@ -235,7 +242,7 @@ export const useGeminiLive = ({
       setIsConnected(false);
       setError(error instanceof Error ? error : new Error("Failed to connect"));
     }
-  }, [apiKey, audioStream, crew, isIncidentMode, weather]);
+  }, [apiKey, audioStream, crew, isIncidentMode, weather, previousLogLocation]);
 
   useEffect(() => {
     if (isRecording && config.mode !== 'off') {

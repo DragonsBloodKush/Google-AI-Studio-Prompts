@@ -123,6 +123,12 @@ export const VideoRecorder: React.FC<VideoRecorderProps> = ({
   const streamRef = useRef<MediaStream | null>(null);
   const mixingContextRef = useRef<AudioContext | null>(null);
 
+  // --- DERIVED STATE ---
+  // Attempt to retrieve previous location context (mocking or inferring since not stored explicitly yet)
+  const previousLogLocation = savedTranscripts.length > 0 
+    ? "Unknown (Check previous log entries)" 
+    : null;
+
   // --- HOOKS ---
   const { currentText, isSpeaking, transcript, error: liveError } = useGeminiLive({
     apiKey: apiKey,
@@ -132,7 +138,8 @@ export const VideoRecorder: React.FC<VideoRecorderProps> = ({
     audioStream,
     crew,
     isIncidentMode,
-    weather
+    weather,
+    previousLogLocation
   });
 
   // --- EFFECTS ---
